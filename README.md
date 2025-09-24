@@ -474,8 +474,3 @@ docker system prune -af
 - Comunicación entre servicios en red privada
 - Logs no exponen información sensible
 
----
-
-## Licencia
-
-Este proyecto está bajo la Licencia MIT. Ver el archivo `LICENSE` para más detalles.
