@@ -1,0 +1,85 @@
+name: CI/CD Deploy
+
+on:
+  push:
+    branches:
+      - develop
+  workflow_dispatch:  
+
+env:
+  IMAGE_NAME: dariohg/cicd-nodejs-aws
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Log in to Docker Hub
+        run: echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+
+      - name: Build Docker image
+        run: |
+          IMAGE_TAG=${{ github.sha }}
+          docker build -t ${{ env.IMAGE_NAME }}:$IMAGE_TAG -t ${{ env.IMAGE_NAME }}:latest .
+
+      - name: Push Docker image
+        run: |
+          IMAGE_TAG=${{ github.sha }}
+          docker push ${{ env.IMAGE_NAME }}:$IMAGE_TAG
+          docker push ${{ env.IMAGE_NAME }}:latest
+
+      - name: Deploy on EC2
+        uses: appleboy/ssh-action@v0.1.10
+        with:
+          host: 52.207.130.167
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            set -e
+            # Crear red si no existe
+            sudo docker network create app-network || true
+
+            # Levantar contenedor MySQL si no existe
+            if [ ! "$(sudo docker ps -q -f name=db)" ]; then
+              if [ "$(sudo docker ps -aq -f status=exited -f name=db)" ]; then
+                sudo docker rm db
+              fi
+              sudo docker run -d \
+                --name db \
+                --network app-network \
+                -e MYSQL_ROOT_PASSWORD=${{ secrets.DB_PASSWORD }} \
+                -e MYSQL_DATABASE=${{ secrets.DB_NAME }} \
+                -p 3307:3306 \
+                --restart unless-stopped \
+                mysql:8
+            fi
+
+            # Generar archivo .env para la API
+            cat > /home/ubuntu/.env <<'EOF'
+            PORT=${{ secrets.PORT }}
+            NODE_ENV=${{ secrets.NODE_ENV }}
+            DB_HOST=db
+            DB_PORT=3306
+            DB_NAME=${{ secrets.DB_NAME }}
+            DB_USER=${{ secrets.DB_USER }}
+            DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+            EOF
+
+            echo "${{ secrets.DOCKERHUB_TOKEN }}" | sudo docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin || true
+
+            IMAGE_TAG=${{ github.sha }}
+            sudo docker pull ${{ env.IMAGE_NAME }}:$IMAGE_TAG
+            sudo docker stop api || true
+            sudo docker rm api || true
+            sudo docker run -d --name api \
+              --network app-network \
+              --env-file /home/ubuntu/.env \
+              -p 3000:3000 \
+              --restart unless-stopped \
+              ${{ env.IMAGE_NAME }}:$IMAGE_TAG
+
+            # Ejecutar migraciones
+            sudo docker exec api npm run migrate || true
