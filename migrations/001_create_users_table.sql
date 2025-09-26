@@ -1,9 +1,3 @@
--- Migration: Create users table for MySQL
--- Description: Crear tabla de usuarios con campos básicos
--- Author: Sistema CI/CD
--- Date: 2024
-
--- Crear la tabla users si no existe
 CREATE TABLE IF NOT EXISTS users (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
@@ -14,7 +8,6 @@ CREATE TABLE IF NOT EXISTS users (
     INDEX idx_users_created_at (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Insertar datos de ejemplo para testing
 INSERT IGNORE INTO users (name, email) VALUES
     ('John Doe', 'john.doe@example.com'),
     ('Jane Smith', 'jane.smith@example.com'),
