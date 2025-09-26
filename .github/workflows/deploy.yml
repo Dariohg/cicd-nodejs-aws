@@ -1,0 +1,50 @@
+name: CI/CD Deploy
+
+on:
+  push:
+    branches:
+      - develop
+  workflow_dispatch:   # permite ejecutar manualmente desde la UI
+
+env:
+  IMAGE_NAME: dariohg/cicd-nodejs-aws
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Log in to Docker Hub
+        run: echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+
+      - name: Build Docker image (tagged by sha)
+        run: |
+          IMAGE_TAG=${{ github.sha }}
+          docker build -t ${{ env.IMAGE_NAME }}:$IMAGE_TAG -t ${{ env.IMAGE_NAME }}:latest .
+
+      - name: Push Docker images
+        run: |
+          IMAGE_TAG=${{ github.sha }}
+          docker push ${{ env.IMAGE_NAME }}:$IMAGE_TAG
+          docker push ${{ env.IMAGE_NAME }}:latest
+
+      - name: Deploy on EC2 via SSH
+        uses: appleboy/ssh-action@v0.1.10
+        with:
+          host: 52.207.130.167
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            set -e
+            # si docker necesita sudo en tu EC2, usa sudo delante de los comandos:
+            echo "${{ secrets.DOCKERHUB_TOKEN }}" | sudo docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin || true
+            IMAGE_TAG=${{ github.sha }}
+            sudo docker pull ${{ env.IMAGE_NAME }}:$IMAGE_TAG
+            sudo docker stop api || true
+            sudo docker rm api || true
+            sudo docker run -d --name api -p 3000:3000 --restart unless-stopped ${{ env.IMAGE_NAME }}:$IMAGE_TAG
+            # Ejecutar migraciones (ajusta al comando que uses, ej. prisma/sequelize)
+            sudo docker exec api npm run migrate || true
